@@ -5,89 +5,60 @@ on:
     branches:
       - main
 
-jobs:
-  # Job 1: Prepare and Build Docker Image
-  prepare-build:
-    runs-on: ubuntu-latest
+env:
+  IMAGE_NAME: ghcr.io/${{ github.actor }}/spark-tts
+  VERSION: ${{ secrets.VERSION || '0.0.1' }}
 
-    outputs:
-      cache-key: ${{ steps.set-cache-key.outputs.cache-key }}
+jobs:
+  build:
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Set Version
-        run: |
-          VERSION=${{ secrets.VERSION || '0.0.2' }}
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
 
-      - name: Set Cache Key
-        id: set-cache-key
-        run: echo "cache-key=${{ runner.os }}-docker-${{ github.sha }}" >> $GITHUB_ENV
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT }}
 
       - name: Cache Docker Layers
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: /tmp/.buildx-cache
           key: ${{ runner.os }}-docker-${{ github.sha }}
           restore-keys: |
             ${{ runner.os }}-docker-
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Build Docker Image with Cache
+      - name: Build and Export Cache
         run: |
           docker buildx build \
             --cache-from=type=local,src=/tmp/.buildx-cache \
-            --cache-to=type=local,dest=/tmp/.buildx-cache-new \
-            -t ghcr.io/${{ github.actor }}/spark-tts:${{ secrets.VERSION || '0.0.2' }} \
-            -t ghcr.io/${{ github.actor }}/spark-tts:latest \
-            --load .
+            --cache-to=type=local,dest=/tmp/.buildx-cache-new,mode=max \
+            --tag $IMAGE_NAME:$VERSION \
+            --tag $IMAGE_NAME:latest \
+            --output=type=docker \
+            --file Dockerfile \
+            .
 
       - name: Move Cache
         run: |
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
-      - name: Save Cache
-        uses: actions/upload-artifact@v3
-        with:
-          name: docker-cache
-          path: /tmp/.buildx-cache
-
-  # Job 2: Push Docker Image
-  push-image:
-    needs: prepare-build
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v3
-
-      - name: Login to GitHub Container Registry
-        run: echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-
-      - name: Download Docker Cache
-        uses: actions/download-artifact@v3
-        with:
-          name: docker-cache
-          path: /tmp/.buildx-cache
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Push Docker Image with Version Tag
+      - name: Push Docker Image
         run: |
-          docker buildx build \
-            --cache-from=type=local,src=/tmp/.buildx-cache \
-            -t ghcr.io/${{ github.actor }}/spark-tts:${{ secrets.VERSION || '0.0.2' }} \
-            --push .
+          docker push $IMAGE_NAME:$VERSION
+          docker push $IMAGE_NAME:latest
 
-      - name: Push Docker Image with Branch Tag
-        run: |
-          docker buildx build \
-            --cache-from=type=local,src=/tmp/.buildx-cache \
-            -t ghcr.io/${{ github.actor }}/spark-tts:latest \
-            --push .
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-build-cache
+          path: /tmp/.buildx-cache
+          retention-days: 7
