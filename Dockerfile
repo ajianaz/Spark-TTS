@@ -1,9 +1,6 @@
-# Base image with specified CUDA version
+# Stage 1: Build environment
 ARG WORKER_CUDA_VERSION=12.1.0
-FROM runpod/base:0.6.2-cuda${WORKER_CUDA_VERSION}
-
-# Reinitialize the ARG as it's lost after FROM
-ARG WORKER_CUDA_VERSION=12.1.0
+FROM runpod/base:0.6.2-cuda${WORKER_CUDA_VERSION} AS build-env
 
 # Set working directory
 WORKDIR /app
@@ -19,41 +16,35 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Initialize Conda and create environment
+# Create a Conda environment and install dependencies
 RUN /opt/miniconda/bin/conda init bash && \
     /opt/miniconda/bin/conda create -n sparktts -y python=3.12 && \
     echo "source /opt/miniconda/bin/activate sparktts" >> ~/.bashrc
 
-# Ensure subsequent commands use the activated Conda environment
+# Ensure Conda environment is active for the following commands
 SHELL ["/bin/bash", "-c"]
 
-# Copy requirements.txt into the container
+# Copy requirements and install them
 COPY requirements.txt /app/requirements.txt
-
-# Install Python dependencies in Conda environment
 RUN source /opt/miniconda/bin/activate sparktts && \
-    pip install --upgrade pip --no-cache-dir && \
+    pip install --upgrade pip && \
     pip install -r /app/requirements.txt --no-cache-dir && \
-    conda clean --all --yes && \
-    rm /app/requirements.txt /tmp/*
+    rm /app/requirements.txt
 
-# Install Torch with proper CUDA version
+# Uninstall existing Torch and install the appropriate version
 RUN source /opt/miniconda/bin/activate sparktts && \
     CUDA_VERSION_SHORT=$(echo ${WORKER_CUDA_VERSION} | cut -d. -f1,2 | tr -d .) && \
     pip uninstall torch -y && \
-    pip install --pre torch==2.6.0.dev20241112+cu${CUDA_VERSION_SHORT} \
-    --index-url https://download.pytorch.org/whl/nightly/cu${CUDA_VERSION_SHORT} --no-cache-dir && \
-    conda clean --all --yes && \
-    rm -rf /tmp/* /opt/miniconda/pkgs/*
+    pip install --pre torch==2.6.0.dev20241112+cu${CUDA_VERSION_SHORT} --index-url https://download.pytorch.org/whl/nightly/cu${CUDA_VERSION_SHORT} --no-cache-dir
 
-# Set HF_HOME to handle HuggingFace cache
-ENV HF_HOME=/runpod-volume
+# Stage 2: Final image
+FROM runpod/base:0.6.2-cuda${WORKER_CUDA_VERSION}
+WORKDIR /app
 
-# Copy project files into the container
+# Copy Conda environment and project files from build stage
+COPY --from=build-env /opt/miniconda /opt/miniconda
 COPY . .
 
-# Debugging: Check disk usage during build
-RUN df -h && du -sh /tmp /opt/miniconda/envs/sparktts
-
-# Set the entry point to the handler script
+# Activate Conda environment for final execution
+ENV PATH="/opt/miniconda/bin:$PATH"
 CMD ["python3.12", "-u", "/app/handler.py"]

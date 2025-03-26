@@ -6,20 +6,25 @@ on:
       - main
 
 jobs:
-  build-and-push:
+  # Job 1: Prepare and Build Docker Image
+  prepare-build:
     runs-on: ubuntu-latest
+
+    outputs:
+      cache-key: ${{ steps.set-cache-key.outputs.cache-key }}
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Login to GitHub Container Registry
-        run: echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-
       - name: Set Version
         run: |
           VERSION=${{ secrets.VERSION || '0.0.2' }}
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Set Cache Key
+        id: set-cache-key
+        run: echo "cache-key=${{ runner.os }}-docker-${{ github.sha }}" >> $GITHUB_ENV
 
       - name: Cache Docker Layers
         uses: actions/cache@v3
@@ -37,7 +42,7 @@ jobs:
           docker buildx build \
             --cache-from=type=local,src=/tmp/.buildx-cache \
             --cache-to=type=local,dest=/tmp/.buildx-cache-new \
-            -t ghcr.io/${{ github.actor }}/spark-tts:$VERSION \
+            -t ghcr.io/${{ github.actor }}/spark-tts:${{ secrets.VERSION || '0.0.2' }} \
             -t ghcr.io/${{ github.actor }}/spark-tts:latest \
             --load .
 
@@ -46,8 +51,23 @@ jobs:
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
-      - name: Push Docker Image with Version Tag
-        run: docker push ghcr.io/${{ github.actor }}/spark-tts:$VERSION
+      - name: Save Cache
+        uses: actions/upload-artifact@v3
+        with:
+          name: docker-cache
+          path: /tmp/.buildx-cache
 
-      - name: Push Docker Image with Branch Tag
-        run: docker push ghcr.io/${{ github.actor }}/spark-tts:latest
+  # Job 2: Push Docker Image
+  push-image:
+    needs: prepare-build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        run: echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Download Docker Cache
+        uses: actions/download
