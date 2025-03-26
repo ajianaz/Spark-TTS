@@ -20,21 +20,26 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Initialize Conda and create environment
-RUN conda create -n sparktts -y python=3.12 && \
-    echo "conda activate sparktts" > ~/.bashrc
+RUN /opt/miniconda/bin/conda init bash && \
+    /opt/miniconda/bin/conda create -n sparktts -y python=3.12 && \
+    echo "source /opt/miniconda/bin/activate sparktts" >> ~/.bashrc
 
-# Activate conda environment for all future RUN commands
-SHELL ["/bin/bash", "-c", "conda activate sparktts && conda config --set always_yes yes --set changeps1 no && source ~/.bashrc && conda activate sparktts &&"]
+# Ensure subsequent commands use the activated Conda environment
+SHELL ["/bin/bash", "-c"]
 
-# Copy requirements and install Python dependencies
+# Copy requirements.txt into the container
 COPY requirements.txt /app/requirements.txt
-RUN pip install --upgrade pip && \
+
+# Install Python dependencies in Conda environment
+RUN source /opt/miniconda/bin/activate sparktts && \
+    pip install --upgrade pip && \
     pip install -r /app/requirements.txt --no-cache-dir && \
     rm /app/requirements.txt
 
-# Uninstall torch and install the appropriate version
-RUN pip uninstall torch -y && \
+# Uninstall existing Torch and install the appropriate version
+RUN source /opt/miniconda/bin/activate sparktts && \
     CUDA_VERSION_SHORT=$(echo ${WORKER_CUDA_VERSION} | cut -d. -f1,2 | tr -d .) && \
+    pip uninstall torch -y && \
     pip install --pre torch==2.4.0.dev20240518+cu${CUDA_VERSION_SHORT} --index-url https://download.pytorch.org/whl/nightly/cu${CUDA_VERSION_SHORT} --no-cache-dir
 
 # Set HF_HOME to handle HuggingFace cache
@@ -44,4 +49,4 @@ ENV HF_HOME=/runpod-volume
 COPY . .
 
 # Set the entry point to the handler script
-CMD ["python3.11", "-u", "/app/handler.py"]
+CMD ["python3.12", "-u", "/app/handler.py"]
