@@ -5,44 +5,59 @@ FROM runpod/base:0.6.2-cuda${WORKER_CUDA_VERSION} AS build-env
 # Set working directory
 WORKDIR /app
 
-# Instal dependensi yang diperlukan
+# Use Bash as default shell
+SHELL ["/bin/bash", "--login", "-c"]
+
+# Install dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
+    git \
+    git-lfs \
     && rm -rf /var/lib/apt/lists/*
 
-# Instal Miniconda
+# Install Miniconda
 RUN wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /miniconda.sh && \
     /bin/bash /miniconda.sh -b -p /opt/miniconda && \
     rm /miniconda.sh
 
-# Tambahkan Miniconda ke PATH
+# Add Miniconda to PATH
 ENV PATH="/opt/miniconda/bin:$PATH"
 
-# Buat environment Conda
-RUN conda create -n sparktts python=3.12 -y
+# Initialize Conda for bash shell
+RUN conda init bash
 
-# Aktifkan environment dan instal Torch yang sesuai dengan CUDA
-RUN /bin/bash -c "conda activate sparktts && \
+# Create and configure Conda environment
+RUN conda create -n sparktts python=3.12 -y && \
+    echo "conda activate sparktts" >> ~/.bashrc
+
+# Activate Conda environment and install PyTorch + CUDA
+RUN /bin/bash -c "source ~/.bashrc && conda activate sparktts && \
     pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121"
 
-# Ensure Conda environment is active for the following commands
-SHELL ["/bin/bash", "-c"]
-
-# Copy requirements dan instal
+# Copy Python requirements and install
 COPY requirements.txt /app/requirements.txt
-RUN conda activate sparktts && \
+RUN /bin/bash -c "source ~/.bashrc && conda activate sparktts && \
     pip install --upgrade pip && \
-    pip install -r /app/requirements.txt --no-cache-dir && \
-    rm /app/requirements.txt
+    pip install -r /app/requirements.txt --no-cache-dir"
+
+# Clone Spark-TTS model using Git LFS
+RUN mkdir -p pretrained_models && \
+    git lfs install && \
+    git clone https://huggingface.co/SparkAudio/Spark-TTS-0.5B pretrained_models/Spark-TTS-0.5B
 
 # Stage 2: Final image
 FROM runpod/base:0.6.2-cuda${WORKER_CUDA_VERSION}
 WORKDIR /app
 
-# Copy Conda environment dan project files dari build stage
-COPY --from=build-env /opt/miniconda /opt/miniconda
-COPY . .
+# Use Bash as default shell
+SHELL ["/bin/bash", "--login", "-c"]
 
-# Aktifkan Conda environment untuk eksekusi final
+# Copy Conda environment and project files from build stage
+COPY --from=build-env /opt/miniconda /opt/miniconda
+COPY --from=build-env /app /app
+
+# Add Miniconda to PATH
 ENV PATH="/opt/miniconda/bin:$PATH"
-CMD ["python3.12", "-u", "/app/handler.py"]
+
+# Activate Conda environment for final execution
+CMD ["bash", "-c", "source ~/.bashrc && conda activate sparktts && python -u /app/handler.py"]
