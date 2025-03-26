@@ -14,9 +14,10 @@ RUN apt-get update && \
     wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh && \
     bash /tmp/miniconda.sh -b -p /opt/miniconda && \
     rm /tmp/miniconda.sh && \
-    /opt/miniconda/bin/conda clean -tipsy && \
+    /opt/miniconda/bin/conda clean --all --yes && \
     ln -s /opt/miniconda/bin/conda /usr/bin/conda && \
-    apt-get clean
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Initialize Conda and create environment
 RUN conda create -n sparktts -y python=3.12 && \
