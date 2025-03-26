@@ -32,15 +32,19 @@ COPY requirements.txt /app/requirements.txt
 
 # Install Python dependencies in Conda environment
 RUN source /opt/miniconda/bin/activate sparktts && \
-    pip install --upgrade pip && \
+    pip install --upgrade pip --no-cache-dir && \
     pip install -r /app/requirements.txt --no-cache-dir && \
-    rm /app/requirements.txt
+    conda clean --all --yes && \
+    rm /app/requirements.txt /tmp/*
 
 # Install Torch with proper CUDA version
 RUN source /opt/miniconda/bin/activate sparktts && \
     CUDA_VERSION_SHORT=$(echo ${WORKER_CUDA_VERSION} | cut -d. -f1,2 | tr -d .) && \
     pip uninstall torch -y && \
-    pip install --pre torch==2.6.0.dev20241112+cu${CUDA_VERSION_SHORT} --index-url https://download.pytorch.org/whl/nightly/cu${CUDA_VERSION_SHORT} --no-cache-dir
+    pip install --pre torch==2.6.0.dev20241112+cu${CUDA_VERSION_SHORT} \
+    --index-url https://download.pytorch.org/whl/nightly/cu${CUDA_VERSION_SHORT} --no-cache-dir && \
+    conda clean --all --yes && \
+    rm -rf /tmp/* /opt/miniconda/pkgs/*
 
 # Set HF_HOME to handle HuggingFace cache
 ENV HF_HOME=/runpod-volume
@@ -48,10 +52,8 @@ ENV HF_HOME=/runpod-volume
 # Copy project files into the container
 COPY . .
 
-# Verify Python version and Torch installation (optional but recommended)
-RUN source /opt/miniconda/bin/activate sparktts && \
-    python --version && \
-    python -c "import torch; print(torch.__version__); print(torch.cuda.is_available())"
+# Debugging: Check disk usage during build
+RUN df -h && du -sh /tmp /opt/miniconda/envs/sparktts
 
 # Set the entry point to the handler script
-CMD ["bash", "-c", "source /opt/miniconda/bin/activate sparktts && python /app/handler.py"]
+CMD ["python3.12", "-u", "/app/handler.py"]
