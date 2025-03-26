@@ -6,7 +6,7 @@ FROM runpod/base:0.6.2-cuda${WORKER_CUDA_VERSION} AS build-env
 WORKDIR /app
 
 # Use Bash as default shell
-SHELL ["/bin/bash", "--login", "-c"]
+SHELL ["/bin/bash", "-c"]
 
 # Install dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -23,22 +23,19 @@ RUN wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86
 # Add Miniconda to PATH
 ENV PATH="/opt/miniconda/bin:$PATH"
 
-# Initialize Conda for bash shell
-RUN conda init bash
+# Initialize Conda for non-interactive environments
+RUN conda config --set auto_activate_base false
 
 # Create and configure Conda environment
-RUN conda create -n sparktts python=3.12 -y && \
-    echo "conda activate sparktts" >> ~/.bashrc
+RUN conda create -n sparktts python=3.12 -y
 
-# Activate Conda environment and install PyTorch + CUDA
-RUN /bin/bash -c "source ~/.bashrc && conda activate sparktts && \
-    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121"
+# Directly activate Conda environment for installation
+RUN /opt/miniconda/bin/conda run -n sparktts pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 
 # Copy Python requirements and install
 COPY requirements.txt /app/requirements.txt
-RUN /bin/bash -c "source ~/.bashrc && conda activate sparktts && \
-    pip install --upgrade pip && \
-    pip install -r /app/requirements.txt --no-cache-dir"
+RUN /opt/miniconda/bin/conda run -n sparktts pip install --upgrade pip && \
+    /opt/miniconda/bin/conda run -n sparktts pip install -r /app/requirements.txt --no-cache-dir
 
 # Clone Spark-TTS model using Git LFS
 RUN mkdir -p pretrained_models && \
@@ -50,7 +47,7 @@ FROM runpod/base:0.6.2-cuda${WORKER_CUDA_VERSION}
 WORKDIR /app
 
 # Use Bash as default shell
-SHELL ["/bin/bash", "--login", "-c"]
+SHELL ["/bin/bash", "-c"]
 
 # Copy Conda environment and project files from build stage
 COPY --from=build-env /opt/miniconda /opt/miniconda
@@ -59,5 +56,5 @@ COPY --from=build-env /app /app
 # Add Miniconda to PATH
 ENV PATH="/opt/miniconda/bin:$PATH"
 
-# Activate Conda environment for final execution
-CMD ["bash", "-c", "source ~/.bashrc && conda activate sparktts && python -u /app/handler.py"]
+# Use Conda run to execute final script
+CMD ["/opt/miniconda/bin/conda", "run", "--no-capture-output", "-n", "sparktts", "python", "-u", "/app/handler.py"]
